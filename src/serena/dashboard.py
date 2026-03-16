@@ -438,11 +438,28 @@ class SerenaDashboardAPI:
         # Get registered projects
         registered_projects: list[dict[str, str | bool]] = []
         for proj in self._agent.serena_config.projects:
+            proj_root = Path(str(proj.project_root))
+            memories_dir = proj_root / ".serena" / "memories"
+            memory_count = 0
+            if memories_dir.is_dir():
+                memory_count = len([p for p in memories_dir.iterdir() if p.is_file() and p.suffix == ".md"])
+
+            prompt_preview = ""
+            proj_cfg = proj_root / ".serena" / "project.yml"
+            if proj_cfg.is_file():
+                for line in proj_cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if line.startswith("initial_prompt:"):
+                        prompt_preview = line.split(":", 1)[1].strip().strip('"')
+                        break
+
             registered_projects.append(
                 {
                     "name": proj.project_name,
-                    "path": str(proj.project_root),
+                    "path": str(proj_root),
                     "is_active": proj.project_name == active_project_name,
+                    "memory_count": str(memory_count),
+                    "has_memories": memory_count > 0,
+                    "prompt_preview": prompt_preview,
                 }
             )
 
@@ -665,7 +682,14 @@ class SerenaDashboardAPI:
         return port
 
     def run_in_thread(self, host: str) -> tuple[threading.Thread, int]:
-        port = self._find_first_free_port(0x5EDA, host)
+        env_port = os.getenv("SERENA_DASHBOARD_PORT")
+        start_port = 0x5EDA
+        if env_port:
+            try:
+                start_port = int(env_port)
+            except ValueError:
+                log.warning("Invalid SERENA_DASHBOARD_PORT=%r; falling back to %d", env_port, 0x5EDA)
+        port = self._find_first_free_port(start_port, host)
         log.info("Starting dashboard (listen_address=%s, port=%d)", host, port)
         thread = threading.Thread(target=lambda: self.run(host=host, port=port), daemon=True)
         thread.start()
